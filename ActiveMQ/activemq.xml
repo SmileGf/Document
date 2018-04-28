@@ -1,0 +1,199 @@
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd"> 
+
+<!-- 允许我们在此配置文件中使用系统属性作为变量 --> 
+	<bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer"> 
+		<property name="locations"> 
+			<value>file:${activemq.conf}/credentials.properties</value> 
+		</property> 
+	</bean> 
+
+	<!-- 允许访问服务器日志 --> 
+	<bean id="logQuery" class="io.fabric8.insight.log.log4j.Log4jLogQuery" lazy-init="false" scope="singleton" init-method="start"  destroy-method="stop"> 
+	</bean> 
+
+	<!-- The <broker> element 用于配置ActiveMQ代理. --> 
+	<broker xmlns="http://activemq.apache.org/schema/core" brokerName="localhost" dataDirectory="${activemq.data}"> 
+
+		<destinationPolicy> 
+			<policyMap> 
+				<policyEntries> 
+					<policyEntry topic=">" producerFlowControl="true" optimizedDispatch="true"  memoryLimit="16mb"> 
+						<!-- The constantPendingMessageLimitStrategy is used to prevent slow topic consumers to block producers and affect other consumers by limiting the number of messages that are retained For more information, see: http://activemq.apache.org/slow-consumer-handling.html --> 
+						<!-- 消息限制策略，面向Slow Consumer的此策略只对Topic有效，只对nondurable订阅者有效，当通道中有大量的消息积压时，broker可以保留的消息量。
+							 为了防止Topic中有慢速消费者，导致整个通道消息积压。(对于Topic而言，一条消息只有所有的订阅者都消费才会被删除)-->
+						<pendingMessageLimitStrategy> 
+							<!--ConstantPendingMessageLimitStrategy: 保留固定条数的消息，如果消息量超过limit，将使用“MessageEvictionStrategy”移除消息
+								PrefetchRatePendingMessageLimitStrategy: 保留prefetchSize倍数条消息。-->
+							<!-- 如果prefetchSize为100，则保留10 * 100条消息 --> 
+							<prefetchRatePendingMessageLimitStrategy multiplier="10"/> 
+						</pendingMessageLimitStrategy>
+
+
+						<!--消息剔除策略 面向Slow Consumer的配合PendingMessageLimitStrategy，只对Topic有效,只对nondurable订阅者有效。当PendingMessage的数量超过限制时，broker该如何剔除多余的消息。当		Topic接收到信息消息后，会将消息“Copy”给每个订阅者，在保存这个消息时(保存策略"PendingSubscriberMessageStoragePolicy")，将会检测pendingMessages的数量是否超过限制				(由"PendingMessageLimitStrategy"来检测)，如果超过限制，将会在pendingMessages中使用MessageEvicationStrategy移除多余的消息，此后将新消息保存在PendingMessages中。-->
+						<messageEvictionStrategy>
+							<!--OldestMessageEvictionStrategy: 移除旧消息，默认策略。
+								OldestMessageWithLowestPriorityEvictionStrategy: 旧数据中权重较低的消息，将会被移除。
+								UniquePropertyMessageEvictionStrategy: 移除具有指定property的旧消息。开发者可以指定property的名称，从此属性值相同的消息列表中移除较旧的（根据消息的创建时间）。-->
+							<OldestMessageWithLowestPriorityEvictionStrategy />  
+						</messageEvictionStrategy> 
+
+						<!--慢速消费者策略Broker将如何处理慢消费者。Broker将会启动一个后台线程用来检测所有的慢速消费者，并定期关闭关闭它们。-->
+						<slowConsumerStrategy> 
+							<!--AbortSlowConsumerStrategy: 中断慢速消费者，慢速消费将会被关闭。abortConnection是否关闭连接
+								AbortSlowConsumerStrategy: 如果慢速消费者最后一个ACK距离现在的时间间隔超过阀maxTimeSinceLastAck，-->
+								<abortSlowConsumerStrategy abortConnection="false"/>
+							<!-- 不关闭底层链接 -->    
+						</slowConsumerStrategy> 
+
+						<!--转发策略 将消息转发给消费者的方式-->
+						<dispatchPolicy>
+							<!--RoundRobinDispatchPolicy: “轮询”，消息将依次发送给每个“订阅者”。“订阅者”列表默认按照订阅的先后顺序排列，在转发消息时，对于匹配消息的第一个订阅者，将会被移动到“订阅者”		列表的尾部，这也意味着“下一条”消息，将会较晚的转发给它。
+								StrictOrderDispatchPolicy: 严格有序，消息依次发送给每个订阅者，按照“订阅者”订阅的时间先后。它和RoundRobin最大的区别是，没有移动“订阅者”顺序的操作。
+								PriorityDispatchPolicy: 基于“property”权重对“订阅者”排序。它要求开发者首先需要对每个订阅者指定priority，默认每个consumer的权重都一样。
+								SimpleDispatchPolicy: 默认值，按照当前“订阅者”列表的顺序。其中PriorityDispatchPolicy是其子类。-->
+							<strictOrderDispatchPolicy/>
+						</dispatchPolicy>
+
+						<!--恢复策略 ActiveMQ重启如何恢复数据-->
+						<subscriptionRecoveryPolicy>
+							<!--FixedSizedSubscriptionRecoveryPolicy: 保存一定size的消息，broker将为此Topic开辟定额的RAM用来保存最新的消息。使用maximumSize属性指定保存的size数量
+								FixedCountSubscriptionRecoveryPolicy: 保存一定条数的消息。 使用maximumSize属性指定保存的size数量
+								LastImageSubscriptionRecoveryPolicy: 只保留最新的一条数据
+								QueryBasedSubscriptionRecoveryPolicy: 符合置顶selector的消息都将被保存，具体能够“恢复”多少消息，由底层存储机制决定；比如对于非持久化消息，只要内存中还存在，则都可以恢复。
+								TimedSubscriptionRecoveryPolicy: 保留最近一段时间的消息。使用recoverDuration属性指定保存时间 单位毫秒
+								NoSubscriptionRecoveryPolicy: 关闭“恢复机制”。默认值。-->
+							<!--恢复最近30分钟内的信息-->
+							<timedSubscriptionRecoveryPolicy recoverDuration="1800000"/>
+						</subscriptionRecoveryPolicy>
+
+						 <!--"死信"策略 如何处理过去消息缺省死信队列(Dead Letter Queue)叫做ActiveMQ.DLQ;所有的未送达消息都会被发送到这个队列，以致会非常难于管理。 默认情况下，无论是Topic还是Queue，broker将使用Queue来保存DeadLeader，即死信通道通常为Queue；不过开发者也可以指定为Topic。-->
+						<deadLetterStrategy>
+							<!--IndividualDeadLetterStrategy: 把DeadLetter放入各自的死信通道中,queuePrefix自定义死信前缀，useQueueForQueueMessages使用队列保存死信，还有一个属性为						“useQueueForTopicMessages”，此值表示是否将Topic的DeadLetter保存在Queue中，默认为true。
+							<individualDeadLetterStrategy  queuePrefix="DLQ."useQueueForQueueMessages="true"/>
+								SharedDeadLetterStrategy: 将所有的DeadLetter保存在一个共享的队列中，这是ActiveMQ broker端默认的策略。共享队列默认为“ActiveMQ.DLQ”，可		以通过“deadLetterQueue”属性来设定。还有2个很重要的可选参数，“processExpired”表示是否将过期消息放入死信队列，默认为true；“processNonPersistent”表示是否将“非持久化”消息		放入死信队列，默认为false。
+							 <sharedDeadLetterStrategy deadLetterQueue="DLQ-QUEUE"/> 
+								DiscardingDeadLetterStrategy: broker将直接抛弃DeadLeatter。如果开发者不需要关心DeadLetter，可以使用此策略。AcitveMQ提供了一个便捷的插件：DiscardingDLQBrokerPlugin，来抛弃DeadLetter。下面这个必须配置plugins节点中才对，丢弃所有死信
+							 <discardingDLQBrokerPlugin dropAll="true" dropTemporaryTopics="true" dropTemporaryQueues="true" />
+								丢弃指定死信
+							 <discardingDLQBrokerPlugin dropOnly="MY.EXAMPLE.TOPIC.29 MY.EXAMPLE.QUEUE.87" reportInterval="1000" />
+								使用丢弃正则匹配到死信
+							 <discardingDLQBrokerPlugin dropOnly="MY.EXAMPLE.TOPIC.[0-9]{3} MY.EXAMPLE.QUEUE.[0-9]{3}" reportInterval="3000" />-->
+							<individualDeadLetterStrategy  queuePrefix="DLQ.TOPIC." useQueueForQueueMessages="true"/>
+						</deadLetterStrategy>
+
+						<!--非耐久待处理消息处理策略 类似于:pendingQueuePolicy-->
+						<pendingSubscriberPolicy>
+							<!--支持三种策略：storeCursor, vmCursor和fileCursor。-->
+							<fileCursor/>
+						</pendingSubscriberPolicy>
+
+						<!--耐久待处理消息处理策略 类似于:pendingQueuePolicy-->
+						<pendingDurableSubscriberPolicy>
+							<!--支持三种策略：storeDurableSubscriberCursor, vmDurableCursor和 fileDurableSubscriberCursor。-->
+							<storeDurableSubscriberCursor/>   
+						</pendingDurableSubscriberPolicy>
+					</policyEntry> 
+
+					 <!-- 消息队列-->
+					<policyEntry topic=">" > 
+						<!-- The constantPendingMessageLimitStrategy is used to prevent slow topic consumers to block producers and affect other consumers by limiting the number of messages that are retained For more information, see: http://activemq.apache.org/slow-consumer-handling.html --> 
+						<!-- 消息限制策略，面向Slow Consumer的此策略只对Topic有效，只对nondurable订阅者有效，当通道中有大量的消息积压时，broker可以保留的消息量。
+							 为了防止Topic中有慢速消费者，导致整个通道消息积压。(对于Topic而言，一条消息只有所有的订阅者都消费才会被删除)-->
+						<pendingMessageLimitStrategy> 
+							<!--ConstantPendingMessageLimitStrategy: 保留固定条数的消息，如果消息量超过limit，将使用“MessageEvictionStrategy”移除消息
+								PrefetchRatePendingMessageLimitStrategy: 保留prefetchSize倍数条消息。-->
+							<!--<constantPendingMessageLimitStrategy limit="1000"/> -->
+							<!-- 如果prefetchSize为100，则保留10 * 100条消息 --> 
+							<prefetchRatePendingMessageLimitStrategy multiplier="10"/> 
+						</pendingMessageLimitStrategy>
+						
+						<messageEvictionStrategy>
+							 <OldestMessageWithLowestPriorityEvictionStrategy />
+						</messageEvictionStrategy>
+
+						<slowConsumerStrategy> 
+							 <abortSlowConsumerStrategy abortConnection="false"/>   
+						</slowConsumerStrategy> 
+
+						<dispatchPolicy>
+							 <strictOrderDispatchPolicy/>
+						</dispatchPolicy>
+
+						<subscriptionRecoveryPolicy>
+							<timedSubscriptionRecoveryPolicy recoverDuration="1800000"/>
+						</subscriptionRecoveryPolicy>
+
+						<deadLetterStrategy>
+							<individualDeadLetterStrategy  queuePrefix="DLQ.QUEUE." useQueueForQueueMessages="true"/>
+						</deadLetterStrategy>
+						<!-- pendingQueuePolicy 待消费消息策略通道中有大量Slow Consumer时，Broker该如何优化消息的转发，以及在此情况下，“非持久化”消息达到内存限制时该如何处理。
+							 当Broker接受到消息后，通常将最新的消息写入内存以提高消息转发的效率，提高消息ACK的效率，减少对对底层Store的操作；如果Consumer非常快速，那么消息将会立即转发给Consumer，不需要额外的操作；但当遇到Slow Consumer时，情况似乎并没有那么美好。
+							 持久化消息，通常为：写入Store->线程轮询，从Store中pageIn数据到PendingStorage->转发给Consumer->从PendingStorage中移除->消息ACK后从Store中移除。
+		                     对于非持久化数据，通常为：写入内存->如果内存足够，则PendingStorage直接以内存中的消息转发->如果内存不足，则将内存中的消息swap到临时文件中->从临时文件中pageIn到内存，转发给Consumer。
+		                     AcitveMQ提供了几个的Cursor机制，它就是用来保存Pending Messages。
+		                     1) vmQueueCursor: 将待转发消息保存在额外的内存(JVM linkeList)的存储结构中。是“非持久化消息”的默认设置，如果Broker不支持Persistent，它是任何类型消息的默认设置。有OOM风险。
+							 2) fileQueueCursor: 将消息保存到临时文件中。文件存储方式有broker的tempDataStore属性决定。是“持久化消息”的默认设置。
+							 3) storeCursor: “综合”设置，对于非持久化消息，将采用vmQueueCursor存储，对于持久化消息采用fileQueueCursor。这是强烈推荐的策略，也是效率最好的策略。-->
+						<pendingQueuePolicy>    
+							<storeCursor>  
+								<nonPersistent>  
+									<fileQueueCursor/>  
+								</nonPersistent>  
+							</storeCursor>  
+						</pendingQueuePolicy>
+					</policyEntry> 
+				</policyEntries> 
+			</policyMap> 
+		</destinationPolicy> 
+
+		<!-- The managementContext is used to configure how ActiveMQ is exposed in JMX. By default, ActiveMQ uses the MBean server that is started by the JVM. For more information, see: http://activemq.apache.org/jmx.html 
+		ActiveMQ的特性之一是很好的支持JMX。通过JMX MBeans可以很方便的监听和控制ActiveMQ的broker。--> 
+		<managementContext> 
+			<managementContext createConnector="false"/> 
+		</managementContext> 
+
+		<!-- Configure message persistence for the broker. The default persistence mechanism is the KahaDB store (identified by the kahaDB tag). For more information, see: http://activemq.apache.org/persistence.html --> 
+		<!--持久化存储-->
+		<persistenceAdapter> 
+			<kahaDB directory="${activemq.data}/kahadb"/> 
+			  <!--
+            官方默认的持久化方案AMQ Message Store 是 ActiveMQ5.0 缺省的持久化存储。Message commands 被保存到 transactional journal（由rolling data logs 组成）。Messages 被保存到 data logs 中，同时被 reference store 进行索引以提高存取速度。Date logs由一些单独的 data log 文件组成，缺省的文件大小是 32M，如果某个消息的大小超过了 data log 文件的大小，那么可以修改配置以增加 data log 文件的大小。如果某个 data log 文件中所有的消息都被成功消费了，那么这个 data log 文件将会被标记，以便在下一轮的清理中被删除或者归档。-->
+			<amqPersistenceAdapter directory="${activemq.base}/data" maxFileLength="32mb"/> 
+		</persistenceAdapter> 
+
+		<!-- The systemUsage controls the maximum amount of space the broker will use before disabling caching and/or slowing down producers. For more information, see:							http://activemq.apache.org/producer-flow-control.html 
+		在禁用缓存和/或减慢生产者之前，systemUsage控制代理将使用的最大空间量--> 
+		<systemUsage> 
+			<systemUsage>
+				<memoryUsage> 
+					<memoryUsage percentOfJvmHeap="70" /> 
+				</memoryUsage> 
+
+				<storeUsage> 
+					<storeUsage limit="100 gb"/> 
+				</storeUsage> 
+
+				<tempUsage> 
+					<tempUsage limit="50 gb"/>
+				</tempUsage> 
+			</systemUsage> 
+		</systemUsage>
+
+		<!-- The transport connectors expose ActiveMQ over a given protocol to clients and other brokers. For more information, see: http://activemq.apache.org/configuring-transports.html 
+			 传输连接器将ActiveMQ通过给定的协议暴露给客户和其他代理--> <transportConnectors> 
+			<!-- DOS protection, limit concurrent connections to 1000 and frame size to 100MB --> 
+			<transportConnector name="openwire" uri="tcp://0.0.0.0:61616?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/> <transportConnector name="amqp" uri="amqp://0.0.0.0:5672?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/> 
+
+			<transportConnector name="stomp" uri="stomp://0.0.0.0:61613?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/> <transportConnector name="mqtt" uri="mqtt://0.0.0.0:1883?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/>
+
+			<transportConnector name="ws" uri="ws://0.0.0.0:61614?maximumConnections=1000&amp;wireFormat.maxFrameSize=104857600"/> 
+		</transportConnectors> 
+
+		<!-- destroy the spring context on shutdown to stop jetty --> 
+		<shutdownHooks> 
+			<bean xmlns="http://www.springframework.org/schema/beans" class="org.apache.activemq.hooks.SpringContextHook" />
+		</shutdownHooks> 
+	</broker> 
+	<!-- Enable web consoles, REST and Ajax APIs and demos The web consoles requires by default login, you can disable this in the jetty.xml file Take a look at ${ACTIVEMQ_HOME}/conf/jetty.xml for more details --> 
+	<import resource="jetty.xml"/> 
+</beans>
