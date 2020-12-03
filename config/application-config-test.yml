@@ -1,7 +1,7 @@
 # mqtt
 mqtt:
-  username: test
-  password: test
+  username: test-config-api
+  password: test-config-api
   #MQTT-服务器连接地址，如果有多个，用逗号隔开，如：tcp://127.0.0.1:61613，tcp://192.168.2.133:61613
   url: tcp://30.21.134.55:1883
   timeout: 60000
