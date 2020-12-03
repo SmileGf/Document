@@ -2,3 +2,6 @@
 logging:
   level:
     com.netflix: warn
+mqtt:
+ username: test
+ password: test
