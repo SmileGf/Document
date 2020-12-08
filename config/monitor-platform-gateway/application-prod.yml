@@ -1,0 +1,27 @@
+spring:
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: false
+          lower-case-service-id: true
+      routes:
+        - id: monitor-platform-api-route
+          uri: lb://monitor-platform-api
+          predicates:
+            - Path=/api/route/**
+          filters:
+            - StripPrefix=2
+        - id: monitor-platform-socket-route
+          uri: lb://monitor-platform-socket
+          predicates:
+            - Path=/api/socket/**
+          filters:
+            - StripPrefix=1
+        - id: monitor-platform-config-server-route
+          uri: lb://monitor-platform-config-server
+          predicates:
+            - Path=/api/config/**
+          filters:
+            - StripPrefix=1
+
