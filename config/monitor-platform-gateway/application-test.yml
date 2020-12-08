@@ -1,0 +1,38 @@
+spring:
+  cloud:
+    gateway:
+      # 跨域
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedHeaders: "*"
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - DELETE
+              - PUT
+              - OPTION
+      discovery:
+        locator:
+          enabled: false
+          lower-case-service-id: true
+      routes:
+        - id: monitor-platform-api-route
+          uri: lb://monitor-platform-api
+          predicates:
+            - Path=/api/route/**
+          filters:
+            - StripPrefix=2
+        - id: monitor-platform-socket-route
+          uri: lb://monitor-platform-socket
+          predicates:
+            - Path=/api/socket/**
+          filters:
+            - StripPrefix=2
+        - id: monitor-platform-config-route
+          uri: lb://monitor-platform-config
+          predicates:
+            - Path=/api/config/**
+          filters:
+            - StripPrefix=2
