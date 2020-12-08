@@ -36,3 +36,6 @@ spring:
             - Path=/api/config/**
           filters:
             - StripPrefix=2
+
+test:
+  name: git-test-name
