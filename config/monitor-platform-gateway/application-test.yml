@@ -38,4 +38,4 @@ spring:
             - StripPrefix=2
 
 test:
-  name: git-test-name
+  name: git-gateway-test-name
